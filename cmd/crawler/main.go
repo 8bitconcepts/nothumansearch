@@ -47,6 +47,10 @@ func main() {
 	workers := flag.Int("workers", 5, "Number of concurrent crawlers")
 	flag.Parse()
 
+	if err := validateDryRun(*dryRun, *recrawl, *recategorize); err != nil {
+		log.Fatal(err)
+	}
+
 	if !*dryRun {
 		if err := database.Connect(); err != nil {
 			log.Fatalf("database: %v", err)
@@ -447,4 +451,11 @@ func printSite(s *models.Site) {
 		s.Domain, s.AgenticScore, s.Category,
 		strings.Join(signals, ", "), featured)
 	_ = time.Now() // prevent unused import
+}
+
+func validateDryRun(dryRun, recrawl, recategorize bool) error {
+	if dryRun && (recrawl || recategorize) {
+		return fmt.Errorf("dry-run cannot be combined with recrawl or recategorize")
+	}
+	return nil
 }
