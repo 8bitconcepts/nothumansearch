@@ -28,6 +28,12 @@ def run(
 
 class ExactProviderImageBuildTest(unittest.TestCase):
     def test_reconstructs_verified_archive_and_never_claims_registry_readiness(self) -> None:
+        self.check_archive_build(extra_commit=False)
+
+    def test_accepts_multiple_commits_since_verified_base(self) -> None:
+        self.check_archive_build(extra_commit=True)
+
+    def check_archive_build(self, extra_commit: bool) -> None:
         with tempfile.TemporaryDirectory(prefix="nhs-image-build-test-") as raw:
             root = pathlib.Path(raw)
             candidate = root / "candidate"
@@ -43,6 +49,10 @@ class ExactProviderImageBuildTest(unittest.TestCase):
             (candidate / "source.txt").write_text("candidate\n", encoding="utf-8")
             run("git", "add", "source.txt", cwd=candidate)
             run("git", "commit", "-q", "-m", "candidate", cwd=candidate)
+            if extra_commit:
+                (candidate / "source.txt").write_text("second change\n", encoding="utf-8")
+                run("git", "add", "source.txt", cwd=candidate)
+                run("git", "commit", "-q", "-m", "second change", cwd=candidate)
             commit = run("git", "rev-parse", "HEAD", cwd=candidate).stdout.strip()
             tree = run("git", "rev-parse", "HEAD^{tree}", cwd=candidate).stdout.strip()
 
@@ -118,6 +128,17 @@ exit 1
                 "EXPECTED_COMMIT": commit,
                 "EXPECTED_ARCHIVE_SHA": archive_sha256,
             })
+            valid_manifest = manifest.read_text(encoding="utf-8")
+            descendant = run(
+                "git", "commit-tree", tree, "-p", commit, "-m", "invalid future base",
+                cwd=candidate,
+            ).stdout.strip()
+            manifest.write_text(valid_manifest.replace(parent, descendant), encoding="utf-8")
+            invalid_base = run(*command, cwd=root, env=env, check=False)
+            self.assertNotEqual(invalid_base.returncode, 0)
+            self.assertFalse(captured_archive.exists())
+            self.assertFalse(receipt.exists())
+            manifest.write_text(valid_manifest, encoding="utf-8")
             built = run(*command, cwd=root, env=env)
             self.assertEqual(hashlib.sha256(captured_archive.read_bytes()).hexdigest(), archive_sha256)
             self.assertEqual(receipt.read_text(encoding="utf-8"), built.stdout)

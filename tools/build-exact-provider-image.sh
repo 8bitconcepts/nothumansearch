@@ -57,7 +57,7 @@ atomic_publish_file_if_absent() {
 CONTRACT=$(manifest_value contract) || exit 1
 COMMIT=$(manifest_value release_commit) || exit 1
 TREE=$(manifest_value release_tree) || exit 1
-PARENT=$(manifest_value release_base_commit) || exit 1
+BASE_COMMIT=$(manifest_value release_base_commit) || exit 1
 ARCHIVE_SHA256=$(manifest_value source_archive_sha256) || exit 1
 BUILD_ARG=$(manifest_value build_arg) || exit 1
 ARCHIVE_TESTS=$(manifest_value exact_archive_tests_passed) || exit 1
@@ -74,7 +74,7 @@ DEPLOYMENT_EMITTED=$(manifest_value deployment_command_emitted) || exit 1
 if [ "$CONTRACT" != "nhs-exact-release-verification-v2" ] ||
    ! [[ "$COMMIT" =~ ^[0-9a-f]{40}$ ]] ||
    ! [[ "$TREE" =~ ^[0-9a-f]{40}$ ]] ||
-   ! [[ "$PARENT" =~ ^[0-9a-f]{40}$ ]] ||
+   ! [[ "$BASE_COMMIT" =~ ^[0-9a-f]{40}$ ]] ||
    ! [[ "$ARCHIVE_SHA256" =~ ^[0-9a-f]{64}$ ]] ||
    [ "$BUILD_ARG" != "RELEASE_REVISION=$COMMIT" ] ||
    [ "$ARCHIVE_TESTS" != "true" ] ||
@@ -93,9 +93,8 @@ fi
 
 ACTUAL_COMMIT=$(git -C "$CANDIDATE_REPOSITORY" rev-parse --verify "${COMMIT}^{commit}")
 ACTUAL_TREE=$(git -C "$CANDIDATE_REPOSITORY" rev-parse "${COMMIT}^{tree}")
-ACTUAL_PARENT=$(git -C "$CANDIDATE_REPOSITORY" rev-parse "${COMMIT}^")
 if [ "$ACTUAL_COMMIT" != "$COMMIT" ] || [ "$ACTUAL_TREE" != "$TREE" ] ||
-   [ "$ACTUAL_PARENT" != "$PARENT" ]; then
+   ! git -C "$CANDIDATE_REPOSITORY" merge-base --is-ancestor "$BASE_COMMIT" "$COMMIT"; then
     echo "candidate identity does not match exact release verification" >&2
     exit 1
 fi
