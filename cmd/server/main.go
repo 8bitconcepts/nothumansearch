@@ -4,6 +4,7 @@ import (
 	"compress/gzip"
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -67,10 +68,6 @@ func providerExchangeDisabledHandler(w http.ResponseWriter, _ *http.Request) {
 	})
 }
 
-type databasePinger interface {
-	Ping() error
-}
-
 type healthPayload struct {
 	Status           string `json:"status"`
 	Database         string `json:"db"`
@@ -78,21 +75,27 @@ type healthPayload struct {
 	ProviderExchange string `json:"provider_exchange"`
 }
 
-func healthHandler(db databasePinger, configuredMode ...string) http.Handler {
+func healthHandler(db *sql.DB, configuredMode ...string) http.Handler {
 	mode := providerExchangeModeDisabled
 	if len(configuredMode) > 0 && configuredMode[0] != "" {
 		mode = configuredMode[0]
 	}
-	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Cache-Control", "no-store")
 		response := healthPayload{
 			Status: "ok", Database: "ok", ReleaseRevision: releaseRevision,
 			ProviderExchange: mode,
 		}
-		if db == nil || db.Ping() != nil {
-			response.Status = "degraded"
+		var readOnly bool
+		if db == nil || db.QueryRowContext(r.Context(),
+			`SELECT current_setting('transaction_read_only')::boolean OR pg_is_in_recovery()`).Scan(&readOnly) != nil {
 			response.Database = "unreachable"
+		} else if readOnly {
+			response.Database = "read_only"
+		}
+		if response.Database != "ok" {
+			response.Status = "degraded"
 			w.WriteHeader(http.StatusServiceUnavailable)
 		}
 		_ = json.NewEncoder(w).Encode(response)

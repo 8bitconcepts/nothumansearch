@@ -1,40 +1,54 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/unitedideas/nothumansearch/internal/testpostgres"
 )
 
-type healthPingerStub struct {
-	err error
-}
-
-func (p healthPingerStub) Ping() error { return p.err }
-
 func TestHealthReportsCompiledReleaseRevision(t *testing.T) {
+	dsn := testpostgres.DSN(t, "NHS_HEALTH_TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("set NHS_EMBEDDED_POSTGRES=1 for disposable PostgreSQL")
+	}
+	db, err := sql.Open("postgres", dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	db.SetMaxOpenConns(1)
 	previous := releaseRevision
 	releaseRevision = "0123456789abcdef0123456789abcdef01234567"
 	t.Cleanup(func() { releaseRevision = previous })
 
 	for _, test := range []struct {
 		name       string
-		pingError  error
+		readOnly   bool
 		wantStatus int
 		wantDB     string
 	}{
 		{name: "healthy", wantStatus: http.StatusOK, wantDB: "ok"},
-		{name: "degraded", pingError: errors.New("unreachable"), wantStatus: http.StatusServiceUnavailable, wantDB: "unreachable"},
+		{name: "read only", readOnly: true, wantStatus: http.StatusServiceUnavailable, wantDB: "read_only"},
+		{name: "writes restored", wantStatus: http.StatusOK, wantDB: "ok"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
+			setting := "off"
+			if test.readOnly {
+				setting = "on"
+			}
+			if _, err := db.Exec("SET default_transaction_read_only = " + setting); err != nil {
+				t.Fatal(err)
+			}
 			rr := httptest.NewRecorder()
-			healthHandler(healthPingerStub{err: test.pingError}, providerExchangeModeDisabled).ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/health", nil))
+			healthHandler(db, providerExchangeModeDisabled).ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/health", nil))
 			if rr.Code != test.wantStatus || rr.Header().Get("Cache-Control") != "no-store" {
 				t.Fatalf("health status=%d cache=%q", rr.Code, rr.Header().Get("Cache-Control"))
 			}
@@ -46,6 +60,14 @@ func TestHealthReportsCompiledReleaseRevision(t *testing.T) {
 				t.Fatalf("health payload = %+v", payload)
 			}
 		})
+	}
+}
+
+func TestHealthUnavailableDatabase(t *testing.T) {
+	rr := httptest.NewRecorder()
+	healthHandler(nil).ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/health", nil))
+	if rr.Code != http.StatusServiceUnavailable || !strings.Contains(rr.Body.String(), `"db":"unreachable"`) {
+		t.Fatalf("health = %d %s", rr.Code, rr.Body.String())
 	}
 }
 
