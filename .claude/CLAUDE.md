@@ -40,8 +40,9 @@ llms.txt=25, ai-plugin=20, OpenAPI=20, API=15, MCP=10, robots.txt=5, schema.org=
 # Prepare an exact committed release (never deploys by itself)
 tools/prepare-exact-release.sh <full-commit>
 
-# Deploy only after owner authorization, using the exact command printed by
-# the preparer. Working-tree Docker builds fail the source-revision check.
+# Shane granted standing deployment authority for this site on 2026-10-14.
+# Deploy the verified archive after release checks, preserving rollback.
+# Working-tree Docker builds fail the source-revision check.
 
 # Add new seeds + crawl
 fly ssh console -a nothumansearch -C "/app/crawler -seed -workers 10"
@@ -60,9 +61,16 @@ fly ssh console -a nothumansearch -C "/app/crawler -file /tmp/urls.txt -workers 
 This repo is the #1 source of `N uncommitted changes` stop-hook fires. Mandatory protocol:
 
 **Sequence:** edit → test → intentionally stage → secret scan → commit →
-`tools/prepare-exact-release.sh <full-commit>` → obtain owner deployment
-authorization → run the exact printed archive-context deploy command → verify
-`/health.release_revision` and material behavior → push intentionally → next
-feature.
+`tools/prepare-exact-release.sh <full-commit>` → push the verified branch →
+build and deploy the verified archive → verify `/health.release_revision`,
+database health, and material behavior → record the release → next feature.
+
+Shane explicitly removed per-deployment approval on 2026-10-14. Tests, source
+identity, schema compatibility, one runtime owner, and rollback remain required.
+Provider exchange stays disabled and production ingestion remains held. This
+authority does not authorize new spending, provider contact, or commercial
+commitments. If direct upstream push is unavailable, push to the existing
+authorized fork and open an upstream PR; report that distinction without
+blocking deployment. Do not retry denied credential access without repair.
 
 The commit-and-push step is non-skippable. Crossing a feature boundary (i.e. starting a new logical change) with prior work uncommitted is the failure mode that keeps tripping the hook. If multiple small fixes ship back-to-back, batch them into one commit at the close of that batch — but close it before pivoting.
